@@ -421,7 +421,7 @@ input { font-family: var(--font-body); outline: none; }
       <p><strong>Foot:</strong> When hand empties, pick up foot pile and keep playing.</p>
       <p><strong>Going Out:</strong> Need 2 clean + 2 dirty books, be in your foot, then discard last card.</p>
       <p><strong>Red 3s:</strong> Auto-collected for +100 each. Black 3s block discard pile pickup.</p>
-      <p><strong>Round Minimums:</strong> R1: 50, R2: 90, R3: 120, R4: 150 points for first meld.</p>
+      <p><strong>Round Minimums:</strong> R1: 50, R2: 90, R3: 120, R4: 150 points for first meld. You can play multiple melds in one turn to meet the minimum — the total across all melds counts.</p>
       <p><strong>Scoring:</strong> Joker=50, 2 & A=20, 8–K=10, 4–7=5, 3=5. Cards left in hand = penalty.</p>
     </div>
     <div style="text-align:center;margin-top:14px"><button class="btn" onclick="hideRules()">Got It</button></div>
@@ -587,6 +587,7 @@ function buildView(idx){
     roundScores:GS.roundScores, curRound:GS.curRound, numRounds:GS.numRounds,
     lastAction:GS.lastAction||"", myIdx:idx,
     isGameOver:GS.isGameOver||false,
+    turnMeldPts:GS.curPI===idx?(GS.turnMeldPts||0):0,
   };
 }
 
@@ -701,16 +702,21 @@ function hostProcessAction(pIdx,msg){
     if(!canMeld(sel)){sendToast(pIdx,"Invalid meld!");return;}
     const r=mRank(sel);
     if(p.melds.some(m=>mRank(m)===r)){sendToast(pIdx,"Already have this rank — use Add.");return;}
-    if(!p.hasInit){
-      const pts=mPts(sel);
-      if(pts<ROUND_MINS[Math.min(GS.curRound,3)]){
-        sendToast(pIdx,`First meld needs ${ROUND_MINS[Math.min(GS.curRound,3)]}+ pts (have ${pts})`);return;
-      }
-    }
     const rem=hand.filter(c=>!ids.has(c.id));
     if(p.inFoot)p.foot=rem;else p.hand=rem;
-    p.melds.push(sel);p.hasInit=true;
-    GS.lastAction=p.name+" melded "+r;
+    p.melds.push(sel);
+    // Accumulate meld points this turn toward the round minimum
+    if(!p.hasInit){
+      GS.turnMeldPts=(GS.turnMeldPts||0)+mPts(sel);
+      if(GS.turnMeldPts>=ROUND_MINS[Math.min(GS.curRound,3)]){
+        p.hasInit=true;
+        GS.lastAction=p.name+" melded "+r+" — minimum met! ✅";
+      } else {
+        GS.lastAction=p.name+" melded "+r+` (${GS.turnMeldPts}/${ROUND_MINS[Math.min(GS.curRound,3)]} pts)`;
+      }
+    } else {
+      GS.lastAction=p.name+" melded "+r;
+    }
     checkFoot(p);
     broadcastViews();
   }
@@ -731,12 +737,23 @@ function hostProcessAction(pIdx,msg){
     const rem=hand.filter(c=>!ids.has(c.id));
     if(p.inFoot)p.foot=rem;else p.hand=rem;
     p.melds[mIdx]=combined;
+    // Count added points toward initial meld minimum
+    if(!p.hasInit){
+      GS.turnMeldPts=(GS.turnMeldPts||0)+mPts(sel);
+      if(GS.turnMeldPts>=ROUND_MINS[Math.min(GS.curRound,3)]) p.hasInit=true;
+    }
     GS.lastAction=p.name+" added to "+r;
     checkFoot(p);
     broadcastViews();
   }
   else if(act==='discard'){
     if(GS.phase!=='play')return;
+    // Block discard if melds were played this turn but initial minimum not yet met
+    if(!p.hasInit&&(GS.turnMeldPts||0)>0){
+      const rMin=ROUND_MINS[Math.min(GS.curRound,3)];
+      sendToast(pIdx,`Need ${rMin} pts to open — have ${GS.turnMeldPts}. Meld more cards first!`);
+      return;
+    }
     const hand=p.inFoot?p.foot:p.hand;
     const card=hand.find(c=>c.id===msg.cardId);
     if(!card){sendToast(pIdx,"Card not in hand!");return;}
@@ -755,7 +772,22 @@ function hostProcessAction(pIdx,msg){
     if(rem.length===0&&!p.inFoot){p.inFoot=true;GS.lastAction=p.name+" picks up Foot! 🦶";}
     else{GS.lastAction=p.name+" discarded";}
     GS.curPI=(GS.curPI+1)%GS.players.length;
-    GS.phase="draw";GS.drawn=false;
+    GS.phase="draw";GS.drawn=false;GS.turnMeldPts=0;
+    broadcastViews();
+  }
+  else if(act==='undoMelds'){
+    if(GS.phase!=='play')return;
+    // Only allow undo if initial minimum hasn't been met yet (all melds are from this turn)
+    if(p.hasInit){sendToast(pIdx,"Can't undo — minimum already met.");return;}
+    if(!p.melds.length){sendToast(pIdx,"No melds to undo.");return;}
+    // Return all meld cards back to hand
+    const returnedCards=p.melds.flat();
+    let hand=[...(p.inFoot?p.foot:p.hand),...returnedCards];
+    hand=sortH(hand);
+    if(p.inFoot)p.foot=hand;else p.hand=hand;
+    p.melds=[];
+    GS.turnMeldPts=0;
+    GS.lastAction=p.name+" undid melds";
     broadcastViews();
   }
 }
@@ -787,7 +819,7 @@ function endRound(goOutIdx){
     const savedScores=GS.roundScores;
     const savedRound=GS.curRound;
     GS.players=ns.players;GS.drawPile=ns.drawPile;GS.discardPile=ns.discardPile;
-    GS.curPI=0;GS.phase="draw";GS.drawn=false;
+    GS.curPI=0;GS.phase="draw";GS.drawn=false;GS.turnMeldPts=0;
     GS.roundScores=savedScores;GS.curRound=savedRound;
     GS.lastAction=`Round ${savedRound+1} — min ${ROUND_MINS[Math.min(savedRound,3)]} pts`;
     broadcastViews();
@@ -973,6 +1005,23 @@ function renderGame(){
     piles+='</div>';
   }
   if(canGo) piles+='<div class="can-go-out">✨ You can go out!</div>';
+  if(!v.hasInit){
+    const rMin=ROUND_MINS[Math.min(v.curRound,3)];
+    const tp=v.turnMeldPts||0;
+    if(tp>0){
+      const pct=Math.min(100,Math.round(tp/rMin*100));
+      piles+=`<div style="margin-top:5px;font-size:10px;color:#F59E0B;background:rgba(245,158,11,0.1);padding:4px 7px;border-radius:5px">
+        ⚠️ Opening: ${tp}/${rMin} pts
+        <div style="margin-top:3px;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:var(--gold);border-radius:2px;transition:width 0.3s"></div>
+        </div>
+      </div>`;
+    } else {
+      piles+=`<div style="margin-top:5px;font-size:10px;color:#64748B;background:rgba(255,255,255,0.03);padding:3px 7px;border-radius:5px">
+        🔓 Need ${rMin} pts to open
+      </div>`;
+    }
+  }
   piles+='</div>';
   document.getElementById('pilesArea').innerHTML=piles;
 
@@ -1025,7 +1074,8 @@ function renderGame(){
     ab.innerHTML=`
       <button class="btn btn-green btn-sm" ${selectedIds.size<3?'disabled':''} onclick="doCreateMeld()">New Meld (${selectedIds.size})</button>
       <button class="btn btn-red btn-sm" ${selectedIds.size!==1?'disabled':''} onclick="doDiscard()">Discard</button>
-      <button class="btn btn-ghost btn-sm" onclick="selectedIds.clear();renderGame()">Clear</button>`;
+      <button class="btn btn-ghost btn-sm" onclick="selectedIds.clear();renderGame()">Clear</button>
+      ${!v.hasInit&&(v.turnMeldPts||0)>0?'<button class="btn btn-sm" style="background:rgba(239,68,68,0.12);color:#FCA5A5;border-color:rgba(239,68,68,0.25)" onclick="sendAction({action:\'undoMelds\'})">↩ Undo Melds</button>':''}`;
   } else { ab.style.display='none'; }
 
   // Hand
@@ -1137,7 +1187,7 @@ window.startGame=function(){
   if(!isHost||lobbyPlayers.length<2)return;
   const names=lobbyPlayers.map(p=>p.name);
   const gs=initRound(names);
-  GS={...gs,roundScores:names.map(()=>[]),curRound:0,numRounds,lastAction:'',isGameOver:false};
+  GS={...gs,roundScores:names.map(()=>[]),curRound:0,numRounds,lastAction:'',isGameOver:false,turnMeldPts:0};
   // Send start + initial view to each client
   conns.forEach(c=>{
     const i=c._playerIdx;
