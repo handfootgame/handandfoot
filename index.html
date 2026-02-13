@@ -70,6 +70,8 @@ input{font-family:var(--font-body);outline:none}
 .card{width:var(--card-w);height:var(--card-h);border-radius:8px;flex-shrink:0;position:relative;display:flex;flex-direction:column;padding:4px 6px;user-select:none;transition:transform .15s,box-shadow .15s;cursor:pointer;background:var(--card-bg);border:1.5px solid var(--card-border);box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .card.selected{background:var(--card-sel-bg);border-color:var(--card-sel-border);border-width:2.5px;transform:translateY(-6px);box-shadow:0 0 14px rgba(245,158,11,.5),0 6px 16px rgba(0,0,0,.25)}
 .card.must-play{box-shadow:0 0 12px rgba(239,68,68,.6),0 4px 12px rgba(0,0,0,.2);border-color:var(--danger);border-width:2.5px}
+.card.new-card{animation:newGlow 1.5s ease-in-out 2;border-color:var(--accent);border-width:2.5px}
+@keyframes newGlow{0%{box-shadow:0 0 4px rgba(234,179,8,.2)}50%{box-shadow:0 0 20px rgba(234,179,8,.7),0 0 40px rgba(234,179,8,.3)}100%{box-shadow:0 0 4px rgba(234,179,8,.2)}}
 .card-rank{font-size:var(--card-font);font-weight:700;line-height:1;font-family:var(--font-display)}
 .card-suit-sm{font-size:calc(var(--card-font)*.75);line-height:1}
 .card-suit-lg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:var(--card-suit);opacity:.8}
@@ -150,11 +152,17 @@ input{font-family:var(--font-body);outline:none}
 .meld-rank{font-size:12px;font-weight:700;font-family:var(--font-display)}.meld-count{font-size:10px;color:#64748B}
 .meld-cards-row{display:flex}
 .meld-add-btn{margin-top:5px;font-size:10px;background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent-border);border-radius:5px;padding:2px 9px;font-weight:600}
-.opp-melds{padding:4px 14px 6px}.opp-melds .label{color:var(--text-muted);font-size:10px;font-weight:600;margin-bottom:4px}
-.opp-row{display:flex;gap:12px;overflow-x:auto;padding-bottom:4px}
-.opp-pill{border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);color:#64748B}
-.opp-pill.book-clean{background:rgba(234,179,8,.08);border-color:rgba(234,179,8,.3);color:var(--accent)}
-.opp-pill.book-dirty{background:rgba(147,130,220,.08);border-color:rgba(147,130,220,.3);color:var(--purple)}
+.opp-melds{padding:4px 14px 6px}.opp-melds .label{color:var(--text-muted);font-size:11px;font-weight:600;margin-bottom:6px}
+.opp-player-section{margin-bottom:10px}
+.opp-player-name{color:var(--text-dim);font-size:11px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.opp-melds-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px}
+.opp-meld-card{background:rgba(255,255,255,.05);border-radius:10px;padding:6px 8px;border:1px solid rgba(255,255,255,.1);flex-shrink:0}
+.opp-meld-card.book-clean{background:rgba(234,179,8,.08);border:2px solid var(--accent)}
+.opp-meld-card.book-dirty{background:rgba(147,130,220,.08);border:2px solid #9382DC}
+.opp-meld-header{display:flex;align-items:center;gap:5px;margin-bottom:3px}
+.opp-meld-rank{font-size:12px;font-weight:700;font-family:var(--font-display)}
+.opp-meld-count{font-size:10px;color:#64748B}
+.opp-meld-cards{display:flex}
 .action-bar{display:flex;gap:7px;padding:4px 14px 6px;flex-wrap:wrap;flex-shrink:0}
 .hand-section{background:rgba(0,0,0,.22);border-top:1px solid rgba(255,255,255,.06);padding:6px 14px 14px;flex-shrink:0}
 .hand-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px}
@@ -294,6 +302,7 @@ function initR(names){const n=names.length,nd=n<=2?3:n<=4?5:n<=6?6:7;let dk=sh(m
 
 let peer=null,conns=[],myName="",myIdx=-1,isHost=false,roomCode="",maxPlayers=4,numRounds=4,selTheme="classic",cardBackUrl="";
 let lobbyPlayers=[],GS=null,myView=null,selectedIds=new Set();
+let newCardIds=new Set(),newCardTimer=null;
 
 function genC(){const ch="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let c="";for(let i=0;i<6;i++)c+=ch[Math.floor(Math.random()*ch.length)];return c}
 function pid(c){return"handf-"+c.toLowerCase()}
@@ -311,13 +320,13 @@ function hostMsg(cn,msg){
   }else if(msg.type==='action'&&GS){hAct(cn._pi,msg)}
 }
 function bLobby(){conns.forEach(c=>c.send({type:'lobby',names:lobbyPlayers.map(p=>p.name),maxPlayers,numRounds}))}
-function bViews(){if(!GS)return;conns.forEach(c=>{if(c._pi!=null&&c._pi<GS.players.length)c.send({type:'view',view:mkV(c._pi)})});myView=mkV(0);renderGame()}
+function bViews(){if(!GS)return;conns.forEach(c=>{if(c._pi!=null&&c._pi<GS.players.length)c.send({type:'view',view:mkV(c._pi)})});myView=mkV(0);GS.newIds=null;renderGame()}
 function mkV(i){const p=GS.players[i];return{hand:p.hand,foot:p.foot,inFoot:p.inFoot,melds:p.melds,red3s:p.red3s,hasInit:p.hasInit,
   curPI:GS.curPI,phase:GS.phase,drawn:GS.drawn,discardPile:GS.discardPile,drawCount:GS.drawPile.length,
   allMelds:GS.players.map(pp=>pp.melds),allNames:GS.players.map(pp=>pp.name),
   roundScores:GS.roundScores,curRound:GS.curRound,numRounds:GS.numRounds,
   lastAction:GS.lastAction||"",myIdx:i,isGameOver:GS.isGameOver||false,
-  turnMP:GS.curPI===i?(GS.turnMP||0):0,mustId:GS.curPI===i?GS.mustId:null,theme:selTheme,cardBackUrl}}
+  turnMP:GS.curPI===i?(GS.turnMP||0):0,mustId:GS.curPI===i?GS.mustId:null,newIds:GS.curPI===i?(GS.newIds||null):null,theme:selTheme,cardBackUrl}}
 function clConn(code,name){return new Promise((r,j)=>{const cn=peer.connect(pid(code),{reliable:true});cn.on('open',()=>{cn.send({type:'join',name});cn.on('data',d=>clMsg(d,r,j));conns=[cn]});cn.on('error',e=>j(e));setTimeout(()=>j(new Error('Timed out.')),12000)})}
 function clMsg(msg,jR,jJ){
   if(msg.type==='joined'){myIdx=msg.idx;lobbyPlayers=msg.names.map((n,i)=>({name:n,idx:i}));maxPlayers=msg.maxPlayers;numRounds=msg.numRounds;if(msg.theme)aTheme(msg.theme);if(msg.cardBackUrl)setCB(msg.cardBackUrl);if(jR)jR();jR=null;updateLobby()}
@@ -340,7 +349,7 @@ function hAct(pi,msg){
     const c1=GS.drawPile.pop(),c2=GS.drawPile.pop();let h=[...(p.inFoot?p.foot:p.hand),c1,c2];
     const r3=h.filter(isR3),cl=h.filter(c=>!isR3(c)),rp=GS.drawPile.splice(0,r3.length);h=sH([...cl,...rp]);
     if(p.inFoot)p.foot=h;else p.hand=h;p.red3s=[...p.red3s,...r3];
-    GS.phase="play";GS.drawn=true;GS.mustId=null;GS.lastAction=p.name+" drew 2";bViews();
+    GS.phase="play";GS.drawn=true;GS.mustId=null;GS.newIds=[c1.id,c2.id];GS.lastAction=p.name+" drew 2";bViews();
   }
   else if(a==='pickupDiscard'){
     if(GS.phase!=='draw'||GS.drawn)return;
@@ -352,7 +361,7 @@ function hAct(pi,msg){
     const picked=[...fromD,...extra],topC=fromD[fromD.length-1];
     let h=[...(p.inFoot?p.foot:p.hand),...picked];const r3=h.filter(isR3);h=sH(h.filter(c=>!isR3(c)));
     if(p.inFoot)p.foot=h;else p.hand=h;p.red3s=[...p.red3s,...r3];
-    GS.phase="play";GS.drawn=true;GS.mustId=topC.id;
+    GS.phase="play";GS.drawn=true;GS.mustId=topC.id;GS.newIds=picked.map(c=>c.id);
     GS.lastAction=p.name+` picked up ${picked.length} (must meld ${topC.r})`;bViews();
   }
   else if(a==='meld'){
@@ -395,7 +404,7 @@ function hAct(pi,msg){
     if(curH.length===0&&p.inFoot){const cb=p.melds.filter(m=>isCl(m)).length,db=p.melds.filter(m=>isDr(m)).length;if(cb>=2&&db>=2){endR(pi);return}}
     if(rem.length===0&&!p.inFoot){p.inFoot=true;GS.lastAction=p.name+" picks up Foot! 🦶"}
     else GS.lastAction=p.name+" discarded";
-    GS.curPI=(GS.curPI+1)%GS.players.length;GS.phase="draw";GS.drawn=false;GS.turnMP=0;GS.mustId=null;
+    GS.curPI=(GS.curPI+1)%GS.players.length;GS.phase="draw";GS.drawn=false;GS.turnMP=0;GS.mustId=null;GS.newIds=null;
     bViews();
   }
 }
@@ -443,14 +452,16 @@ function updateLobby(){
 }
 
 // ═══ RENDER CARDS ═══
-function rC(c,o={}){const col=cC(c),j=c.r==="Joker",s=o.selected?'selected':'',sm=o.small?'sm':'',mp=o.must?'must-play':'',cl=o.onClick||'';
-  return`<div class="card ${s} ${sm} ${mp}" ${cl?`onclick="${cl}"`:''} style="color:${col}"><div class="card-rank">${j?'★':c.r}</div><div class="card-suit-sm">${j?'':c.s}</div><div class="card-suit-lg">${j?'🃏':c.s}</div></div>`}
+function rC(c,o={}){const col=cC(c),j=c.r==="Joker",s=o.selected?'selected':'',sm=o.small?'sm':'',mp=o.must?'must-play':'',nw=o.isNew?'new-card':'',cl=o.onClick||'';
+  return`<div class="card ${s} ${sm} ${mp} ${nw}" ${cl?`onclick="${cl}"`:''} style="color:${col}"><div class="card-rank">${j?'★':c.r}</div><div class="card-suit-sm">${j?'':c.s}</div><div class="card-suit-lg">${j?'🃏':c.s}</div></div>`}
 function rB(o={}){const sm=o.small?'sm':'',cl=o.clickable?'clickable':'',hl=o.hl?'hl':'',hi=cardBackUrl?'has-img':'',oc=o.onClick||'';
   return`<div class="card-back ${sm} ${cl} ${hl} ${hi}" ${oc?`onclick="${oc}"`:''} ><div class="card-back-inner"></div></div>`}
 
 // ═══ GAME RENDER ═══
 function renderGame(){
   if(!myView)return;const v=myView,mi=v.myIdx!=null?v.myIdx:myIdx,isMT=v.curPI===mi,hand=v.inFoot?v.foot:v.hand;
+  // Track newly drawn cards with timed glow
+  if(v.newIds&&v.newIds.length){v.newIds.forEach(id=>newCardIds.add(id));clearTimeout(newCardTimer);newCardTimer=setTimeout(()=>{newCardIds.clear();renderGame()},4000)}
   const myM=v.allMelds[mi]||[],rm=RMINS[Math.min(v.curRound,3)];
   const cB=myM.filter(m=>isCl(m)).length,dB=myM.filter(m=>isDr(m)).length,canGo=v.inFoot&&cB>=2&&dB>=2;
   if(v.theme&&v.theme!==selTheme)aTheme(v.theme);if(v.cardBackUrl&&v.cardBackUrl!==cardBackUrl)setCB(v.cardBackUrl);
@@ -487,10 +498,16 @@ function renderGame(){
     mh+='</div>';ms.innerHTML=mh}else ms.style.display='none';
   // Opp melds
   const os=document.getElementById('oppMelds');const hasO=v.allNames.some((n,i)=>i!==mi&&v.allMelds[i]&&v.allMelds[i].length);
-  if(hasO){os.style.display='block';let oh='<div class="label">OPPONENTS\' MELDS</div><div class="opp-row">';
-    v.allNames.forEach((n,i)=>{if(i===mi||!v.allMelds[i]||!v.allMelds[i].length)return;oh+=`<div><div style="color:#64748B;font-size:10px;margin-bottom:3px">${n}</div><div style="display:flex;gap:4px;flex-wrap:wrap">`;
-      v.allMelds[i].forEach(m=>{const r=mR(m),bk=m.length>=BOOK_SIZE,cl=isCl(m);oh+=`<div class="opp-pill ${bk?(cl?'book-clean':'book-dirty'):''}">${r} ×${m.length}${bk?(cl?' 📕':' 📘'):''}</div>`});oh+='</div></div>'});
-    oh+='</div>';os.innerHTML=oh}else os.style.display='none';
+  if(hasO){os.style.display='block';let oh='<div class="label">OPPONENTS\' MELDS</div>';
+    v.allNames.forEach((n,i)=>{if(i===mi||!v.allMelds[i]||!v.allMelds[i].length)return;
+      const cb=v.allMelds[i].filter(m=>isCl(m)).length,db=v.allMelds[i].filter(m=>isDr(m)).length;
+      oh+=`<div class="opp-player-section"><div class="opp-player-name">${n} <span style="color:#64748B;font-weight:400;font-size:10px">📕${cb} 📘${db}</span></div><div class="opp-melds-scroll">`;
+      v.allMelds[i].forEach(m=>{const r=mR(m),bk=m.length>=BOOK_SIZE,cl=isCl(m);
+        oh+=`<div class="opp-meld-card ${bk?(cl?'book-clean':'book-dirty'):''}"><div class="opp-meld-header"><span class="opp-meld-rank" style="color:${bk?(cl?'var(--accent)':'var(--purple)'):'#94A3B8'}">${r||'W'}${bk?(cl?' 📕':' 📘'):''}</span><span class="opp-meld-count">(${m.length})</span></div><div class="opp-meld-cards">`;
+        m.forEach((c,ci)=>{const ov=ci?-Math.round(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-w-sm'))*0.55):0;oh+=`<div style="margin-left:${ov}px">${rC(c,{small:true})}</div>`});
+        oh+='</div></div>'});
+      oh+='</div></div>'});
+    os.innerHTML=oh}else os.style.display='none';
   // Actions
   const ab=document.getElementById('actionBar');
   if(isMT&&v.phase==='play'){ab.style.display='flex';
@@ -501,7 +518,7 @@ function renderGame(){
   if(hand.length){const cw=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-w'))||62;
     const avail=window.innerWidth-32,overlap=Math.min(cw-8,Math.max(cw*.25,(avail-cw)/Math.max(hand.length-1,1)));
     hh+='<div class="hand-fan">';hand.forEach((c,i)=>{const ml=i===0?0:-Math.max(Math.round(cw-overlap),Math.round(cw*.15));
-      hh+=`<div style="margin-left:${ml}px">${rC(c,{selected:selectedIds.has(c.id),must:v.mustId&&c.id===v.mustId,onClick:`toggleSel(${c.id})`})}</div>`});
+      hh+=`<div style="margin-left:${ml}px">${rC(c,{selected:selectedIds.has(c.id),must:v.mustId&&c.id===v.mustId,isNew:newCardIds.has(c.id),onClick:`toggleSel(${c.id})`})}</div>`});
     hh+='</div>'}else hh+='<div class="hand-empty">'+(v.inFoot?'Empty — discard or go out!':'Picking up foot…')+'</div>';
   hs.innerHTML=hh;
   // Game over
@@ -532,7 +549,7 @@ window.startGame=function(){if(!isHost||lobbyPlayers.length<2)return;const ns=in
   GS={...ns,roundScores:lobbyPlayers.map(()=>[]),curRound:0,numRounds,isGameOver:false,lastAction:''};
   conns.forEach(c=>{if(c._pi!=null)c.send({type:'start',view:mkV(c._pi),theme:selTheme,cardBackUrl})});myView=mkV(0);showScr('game');renderGame()};
 window.leaveLobby=function(){if(peer)peer.destroy();peer=null;conns=[];showScr('home');showHomeBtns()};
-window.leaveGame=function(){if(peer)peer.destroy();peer=null;conns=[];GS=null;myView=null;selectedIds.clear();document.getElementById('gameoverOverlay').classList.add('hidden');showScr('home');showHomeBtns()};
+window.leaveGame=function(){if(peer)peer.destroy();peer=null;conns=[];GS=null;myView=null;selectedIds.clear();newCardIds.clear();clearTimeout(newCardTimer);document.getElementById('gameoverOverlay').classList.add('hidden');showScr('home');showHomeBtns()};
 window.showRules=()=>document.getElementById('rulesModal').classList.remove('hidden');
 window.hideRules=()=>document.getElementById('rulesModal').classList.add('hidden');
 window.showScores=function(){const v=myView;if(!v)return;const mi=v.myIdx!=null?v.myIdx:myIdx;
